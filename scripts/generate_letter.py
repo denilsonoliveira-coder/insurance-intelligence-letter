@@ -1,4 +1,4 @@
-"""Gera a newsletter executiva em HTML usando a Gemini API."""
+"""Gera a newsletter executiva em HTML usando a OpenAI API."""
 
 from __future__ import annotations
 
@@ -12,10 +12,9 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from google import genai
-from google.genai import types
+from openai import OpenAI
 
-from config import GEMINI_MODEL, NEWSLETTER_NAME
+from config import NEWSLETTER_NAME, OPENAI_MODEL
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 NEWS_FILE = BASE_DIR / "output" / "news.json"
@@ -60,8 +59,8 @@ Estruture a resposta como newsletter executiva semanal e inclua obrigatoriamente
 Regras de qualidade:
 - Use apenas os fatos presentes nas notícias recebidas.
 - Não invente fatos, números, regulações ou movimentos de concorrentes.
-- Quando não houver evidência para uma seção, escreva claramente que não houve
-  sinal relevante nos feeds daquela semana.
+- Quando não houver evidência para uma seção, informe que não houve sinal relevante
+  nos feeds daquela semana.
 - Diferencie fato, inferência e recomendação.
 - Inclua links clicáveis para as fontes em cada análise relevante.
 - Priorize objetividade, impacto e decisões práticas.
@@ -75,12 +74,12 @@ JavaScript, Markdown, imagens externas ou recursos remotos. Retorne somente HTML
 
 
 def load_news() -> list[dict[str, Any]]:
-    """Carrega e valida o arquivo de noticias."""
+    """Carrega e valida o arquivo de notícias."""
     if not NEWS_FILE.exists():
-        raise FileNotFoundError(f"Arquivo nao encontrado: {NEWS_FILE}")
+        raise FileNotFoundError(f"Arquivo não encontrado: {NEWS_FILE}")
     data = json.loads(NEWS_FILE.read_text(encoding="utf-8"))
     if not isinstance(data, list) or not data:
-        raise ValueError("news.json deve conter uma lista nao vazia.")
+        raise ValueError("news.json deve conter uma lista não vazia.")
     return data
 
 
@@ -88,10 +87,7 @@ def build_input(news: list[dict[str, Any]]) -> str:
     """Monta o contexto estruturado enviado ao modelo."""
     today = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%d/%m/%Y")
     payload = json.dumps(news, ensure_ascii=False, indent=2)
-    return (
-        f"Data de referência: {today}\n\n"
-        f"NOTÍCIAS EM JSON:\n{payload}"
-    )
+    return f"Data de referência: {today}\n\nNOTÍCIAS EM JSON:\n{payload}"
 
 
 def normalize_html(raw: str) -> str:
@@ -106,29 +102,26 @@ def normalize_html(raw: str) -> str:
 
 
 def main() -> None:
-    """Solicita a analise ao Gemini e grava o HTML resultante."""
-    api_key = os.getenv("GEMINI_API_KEY")
+    """Solicita a análise à OpenAI e grava o HTML resultante."""
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
-        raise EnvironmentError("A variavel GEMINI_API_KEY nao foi definida.")
+        raise EnvironmentError("A variável OPENAI_API_KEY não foi definida.")
 
     news = load_news()
-    LOGGER.info("Gerando newsletter com %d noticias e modelo %s", len(news), GEMINI_MODEL)
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=build_input(news),
-        config=types.GenerateContentConfig(
-            system_instruction=STRATEGIC_PROMPT,
-            temperature=0.25,
-            max_output_tokens=16000,
-        ),
+    LOGGER.info("Gerando newsletter com %d notícias e modelo %s", len(news), OPENAI_MODEL)
+    client = OpenAI(api_key=api_key)
+    response = client.responses.create(
+        model=OPENAI_MODEL,
+        instructions=STRATEGIC_PROMPT,
+        input=build_input(news),
+        max_output_tokens=16000,
     )
-    if not response.text or not response.text.strip():
-        raise RuntimeError("A Gemini API retornou uma resposta vazia.")
+    html_text = response.output_text
+    if not html_text or not html_text.strip():
+        raise RuntimeError("A OpenAI API retornou uma resposta vazia.")
 
-    html = normalize_html(response.text)
     LETTER_FILE.parent.mkdir(parents=True, exist_ok=True)
-    LETTER_FILE.write_text(html, encoding="utf-8")
+    LETTER_FILE.write_text(normalize_html(html_text), encoding="utf-8")
     LOGGER.info("Newsletter salva em %s", LETTER_FILE)
 
 
